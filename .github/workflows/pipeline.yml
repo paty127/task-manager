@@ -1,0 +1,92 @@
+name: Pipeline DevSecOps
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          pip install Flask Flask-Bcrypt Flask-Login Flask-SQLAlchemy Flask-WTF WTForms email-validator
+      - name: Build Docker Image
+        run: docker build -t task-manager .
+
+  sast:
+    name: SAST - Bandit
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Bandit
+        run: pip install bandit
+      - name: Run Bandit
+        run: bandit -r . -f txt -o bandit-report.txt || true
+      - name: Upload Bandit Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-report
+          path: bandit-report.txt
+
+  sca:
+    name: SCA - OWASP Dependency Check
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+      - name: OWASP Dependency Check
+        uses: dependency-check/Dependency-Check_Action@main
+        with:
+          project: 'task-manager'
+          path: '.'
+          format: 'HTML'
+          out: 'reports'
+      - name: Upload Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-check-report
+          path: reports/
+
+  deploy-stage:
+    name: Deploy Stage
+    runs-on: ubuntu-latest
+    needs: [sast, sca]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker Image
+        run: docker build -t task-manager .
+      - name: Run Container Stage
+        run: docker run -d -p 5000:5000 --name task-manager-stage task-manager
+
+  dast:
+    name: DAST - OWASP ZAP
+    runs-on: ubuntu-latest
+    needs: deploy-stage
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and Run App
+        run: |
+          docker build -t task-manager .
+          docker run -d -p 5000:5000 --name task-manager task-manager
+          sleep 10
+      - name: ZAP Scan
+        uses: zaproxy/action-baseline@v0.10.0
+        with:
+          target: 'http://localhost:5000'
+          fail_action: false
+          issue_title: 'ZAP Baseline Scan'
+          token: ${{ secrets.GITHUB_TOKEN }}
