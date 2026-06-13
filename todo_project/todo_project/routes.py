@@ -1,6 +1,6 @@
 from flask import render_template, url_for, flash, redirect, request
 
-from todo_project import app, db, bcrypt
+from todo_project import app, db, bcrypt, auth_logger
 
 # Import the forms
 from todo_project.forms import (LoginForm, RegistrationForm, UpdateUserInfoForm, 
@@ -46,15 +46,19 @@ def login():
             login_user(user)
             task_form = TaskForm()
             flash('Login Successfull', 'success')
+            auth_logger.info("AUTH_SUCCESS user=%s ip=%s", user.username, request.remote_addr)
             return redirect(url_for('all_tasks'))
         else:
             flash('Login Unsuccessful. Please check Username Or Password', 'danger')
+            auth_logger.warning("AUTH_FAILURE user=%s ip=%s", form.username.data, request.remote_addr)
     
     return render_template('login.html', title='Login', form=form)
     
 
 @app.route("/logout")
 def logout():
+    if current_user.is_authenticated:
+        auth_logger.info("LOGOUT user=%s ip=%s", current_user.username, request.remote_addr)
     logout_user()
     return redirect(url_for('login'))
 
@@ -71,6 +75,7 @@ def register():
         db.session.add(user)
         db.session.commit()
         flash(f'Account Created For {form.username.data}', 'success')
+        auth_logger.info("ACCOUNT_CREATED user=%s ip=%s", form.username.data, request.remote_addr)
         return redirect(url_for('login'))
 
     return render_template('register.html', title='Register', form=form)
@@ -155,4 +160,3 @@ def change_password():
             flash('Please Enter Correct Password', 'danger') 
 
     return render_template('change_password.html', title='Change Password', form=form)
-
